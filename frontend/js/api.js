@@ -19,7 +19,11 @@ async function apiRequest(route, options = {}) {
         const data = await response.json().catch(() => {
             throw new Error('The server returned an unexpected response. Check that the API is running.');
         });
-        if (!response.ok) throw new Error(data.message || 'Your request could not be completed.');
+        if (!response.ok) {
+            const error = new Error(data.message || 'Your request could not be completed.');
+            error.status = response.status;
+            throw error;
+        }
         return data;
     } finally {
         clearTimeout(timer);
@@ -71,6 +75,10 @@ document.querySelectorAll('form[data-api]').forEach(form => {
             formMessage(form, data.message + (record ? ' Record ID: ' + record._id + '.' : ''), true);
             if (form.id === 'register' || form.id === 'login') {
                 const next = document.querySelector('#account-next');
+                if (data.user.role === 'admin' && next) {
+                    next.querySelector('a').href = 'admin.html';
+                    next.querySelector('a').textContent = 'Open administration';
+                }
                 next?.classList.remove('d-none');
             }
             if (form.id === 'create-category') {
@@ -78,6 +86,7 @@ document.querySelectorAll('form[data-api]').forEach(form => {
                     formMessage(form, data.message + ' Reload the page to refresh your subject choices.', true);
                 });
             }
+            window.dispatchEvent(new Event('record-saved'));
         } catch (error) {
             const message = error.name === 'AbortError' ? 'The request timed out. Check your connection before trying again.' :
                 error instanceof TypeError ? 'Cannot reach the API. Check that the backend is running and try again.' : error.message;
