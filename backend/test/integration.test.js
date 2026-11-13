@@ -131,3 +131,33 @@ test('Malformed JSON and unknown API routes return JSON errors', async () => {
     assert.match((await response.json()).message, /invalid/);
     assert.equal((await request('/api/missing', {})).status, 404);
 });
+
+
+test('GET routes enforce ownership and administrator access', async () => {
+    const get = (route, auth = cookie) => fetch(base + route, { headers: auth ? { Cookie: auth } : {} });
+    assert.equal((await get('/api/tasks', '')).status, 401);
+    assert.equal((await get('/api/users', '')).status, 401);
+    assert.equal((await get('/api/users')).status, 403);
+    assert.equal((await get('/api/admin/tasks')).status, 403);
+
+    const { tasks } = await (await get('/api/tasks')).json();
+    assert.equal(tasks.length, 2);
+    assert.equal(tasks.find(task => task.title === 'Submit Phase 4 report').category.name, 'IT 112');
+
+    const login = await request('/api/users', {
+        name: 'Empty account', email: 'empty@example.test', password: 'LabPassword123!'
+    });
+    const emptyCookie = login.headers.get('set-cookie').split(';')[0];
+    assert.deepEqual(await (await get('/api/tasks', emptyCookie)).json(), { tasks: [] });
+
+    const bcrypt = require('bcryptjs');
+    await User.create({ name: 'Lab admin', email: 'admin@example.test',
+        passwordHash: await bcrypt.hash('LabPassword123!', 4), role: 'admin' });
+    const adminLogin = await request('/api/login', { email: 'admin@example.test', password: 'LabPassword123!' });
+    const adminCookie = adminLogin.headers.get('set-cookie').split(';')[0];
+    const { users } = await (await get('/api/users', adminCookie)).json();
+    assert.ok(users.some(user => user.role === 'admin'));
+    assert.ok(users.every(user => Object.keys(user).every(key => ['_id', 'name', 'email', 'role', 'createdAt'].includes(key))));
+    const overview = await (await get('/api/admin/tasks', adminCookie)).json();
+    assert.ok(overview.tasks.every(task => task.owner.name === 'Phase Four Student'));
+});

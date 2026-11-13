@@ -38,11 +38,11 @@ function createApp(config) {
         try {
             const payload = jwt.verify(req.cookies.bu_session || '', config.secret);
             req.user = await User.findById(payload.sub);
-            if (!req.user) return res.status(401).json({ message: 'Log in to submit your coursework.' });
+            if (!req.user) return res.status(401).json({ message: 'Log in to access your account.' });
             next();
         } catch (error) {
             if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError) {
-                return res.status(401).json({ message: 'Log in to submit your coursework.' });
+                return res.status(401).json({ message: 'Log in to access your account.' });
             }
             next(error);
         }
@@ -53,7 +53,14 @@ function createApp(config) {
     }
 
     function accountData(user) {
-        return { _id: user._id, name: user.name, email: user.email, role: user.role };
+        return { _id: user._id, name: user.name, email: user.email, role: user.role, createdAt: user.createdAt };
+    }
+
+    function administrator(req, res, next) {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ message: 'An administrator account is required.' });
+        }
+        next();
     }
 
     app.get('/api/health', (req, res) => {
@@ -101,6 +108,25 @@ function createApp(config) {
         res.json({ categories: await Category.find({ owner: req.user._id }).sort({ name: 1 }).lean() });
     });
 
+    app.get('/api/tasks', authenticated, async (req, res) => {
+        const tasks = await Task.find({ owner: req.user._id })
+            .populate({ path: 'category', select: 'name color', match: { owner: req.user._id } })
+            .sort({ dueDate: 1, _id: 1 }).lean();
+        res.json({ tasks });
+    });
+
+    app.get('/api/users', authenticated, administrator, async (req, res) => {
+        const users = await User.find().select('name email role createdAt')
+            .sort({ name: 1, _id: 1 }).lean();
+        res.json({ users });
+    });
+
+    app.get('/api/admin/tasks', authenticated, administrator, async (req, res) => {
+        const tasks = await Task.find().populate('owner', 'name')
+            .sort({ dueDate: 1, _id: 1 }).lean();
+        res.json({ tasks });
+    });
+
     app.post('/api/categories', authenticated, async (req, res) => {
         const { name, color } = req.body || {};
         if (!validText(name, 1, 100) || (color && (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)))) {
@@ -140,7 +166,7 @@ function createApp(config) {
         }
         if (error.type === 'entity.too.large') return res.status(413).json({ message: 'The submitted data is too large.' });
         console.error('Request failed:', error.name);
-        res.status(500).json({ message: 'Unable to save your data right now. Please try again.' });
+        res.status(500).json({ message: 'Unable to complete the request. Please try again.' });
     });
     return app;
 }
